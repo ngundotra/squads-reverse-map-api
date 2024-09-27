@@ -1,0 +1,11 @@
+[project]
+name = "squads-reverse-map-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=3.0.3",
+    "requests>=2.32.3",
+    "solders>=0.21.0",
+]
