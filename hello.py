@@ -1,7 +1,9 @@
 from typing import List
+import csv, json, os
+import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify
 from solders.pubkey import Pubkey
-import csv, json, os
 import requests
 
 SQUADS_V3 = Pubkey.from_string("SMPLecH534NA9acpos4G6x7uf3LWbCAwZQE9e8ZekMu")
@@ -35,8 +37,12 @@ def find_vault(squad_type: str, multisig: Pubkey, **kwargs):
 
 LATEST_SQUADS_CSV = "latest-squads.csv"
 LATEST_SQUADS_MAP_JSON = "squads-map.json"
+# Visible at: https://dune.com/queries/4105938
 SQUADS_DUNE_QUERY_ID = 4105938
-def load_squads_map():
+
+def load_squads_map(force_load=False):
+    global SQUADS_MAP
+    print("Loading squads map...")
     def derive_vaults(csv_data: List[str], MAX_DERIVED_VAULTS=10):
         for i, row in enumerate(csv.reader(csv_data)):
             if i == 0: # skip header
@@ -48,7 +54,7 @@ def load_squads_map():
         return squads_map
 
     squads_map = {}
-    if os.path.exists(LATEST_SQUADS_CSV):
+    if not force_load and os.path.exists(LATEST_SQUADS_CSV):
         with open(LATEST_SQUADS_CSV, "r") as f:
             squads_map = derive_vaults(f.readlines())
     else:
@@ -63,25 +69,37 @@ def load_squads_map():
 
     with open(LATEST_SQUADS_MAP_JSON, "w") as f:
         json.dump(squads_map, f)
-    return squads_map
 
+    SQUADS_MAP = squads_map
+
+SQUADS_MAP = {}
 if os.path.exists(LATEST_SQUADS_MAP_JSON):
+    print("Loading squads map from cache...")
     with open(LATEST_SQUADS_MAP_JSON, "r") as f:
-        squads_map = json.load(f)
+        SQUADS_MAP = json.load(f)
 else:
-    squads_map = load_squads_map()
+    load_squads_map()
+
+scheduler = BackgroundScheduler(daemon=True)
+# Force load the squads CSV on startup and then every 24 hours
+scheduler.add_job(
+    lambda: load_squads_map(force_load=True), 
+    'interval', 
+    hours=24, 
+    next_run_time=datetime.datetime.now() + datetime.timedelta(hours=24)
+)
+scheduler.start()
 
 app = Flask(__name__)
-
 
 @app.route("/")
 def main():
     return "Hello from squads-reverse-map-api!"
 
 
-@app.route("/squads/<squad_id>")
-def squad_by_id(squad_id):
-    if squad_id in squads_map:
-        return jsonify(squads_map[squad_id]), 200
+@app.route("/squad/<vault_address>")
+def squad_by_vault(vault_address):
+    if vault_address in SQUADS_MAP:
+        return jsonify(SQUADS_MAP[vault_address]), 200
     else:
         return jsonify({"error": "Squad not found"}), 404
